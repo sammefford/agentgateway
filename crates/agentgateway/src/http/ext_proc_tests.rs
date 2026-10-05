@@ -1501,6 +1501,30 @@ mod immediate_and_failure {
 	use super::*;
 
 	#[tokio::test]
+	async fn premature_request_body_stream_close_fails_closed() {
+		let mock = body_mock(b"upstream-response").await;
+		let processing_options = json!({
+			"requestBodyMode": "fullDuplexStreamed",
+			"responseBodyMode": "fullDuplexStreamed",
+			"requestHeaderMode": "send",
+			"responseHeaderMode": "send",
+			"requestTrailerMode": "send",
+			"responseTrailerMode": "send",
+		});
+		let (_mock, _ext_proc, _bind, io) = setup_ext_proc_mock_with_processing_options(
+			mock,
+			ext_proc::FailureMode::FailClosed,
+			ExtProcMock::new(PrematureRequestBodyCloseExtProc::default),
+			"{}",
+			Some(processing_options),
+		)
+		.await;
+
+		let res = send_request_body(io, Method::POST, "http://lo", b"request").await;
+		assert_eq!(res.status(), 503);
+	}
+
+	#[tokio::test]
 	async fn clean_stream_close_passes_through_response() {
 		let mock = body_mock(b"upstream-response").await;
 		let processing_options = json!({
@@ -3175,6 +3199,39 @@ impl Handler for NopExtProc {
 		}
 		self.sent_resp_body = true;
 		Ok(())
+	}
+}
+
+#[derive(Debug, Default)]
+struct PrematureRequestBodyCloseExtProc {
+	sent_body: bool,
+}
+
+#[async_trait::async_trait]
+impl Handler for PrematureRequestBodyCloseExtProc {
+	async fn handle_request_body(
+		&mut self,
+		_body: &proto::HttpBody,
+		sender: &mpsc::Sender<Result<ProcessingResponse, Status>>,
+	) -> Result<(), Status> {
+		let response = Some(CommonResponse {
+			body_mutation: Some(BodyMutation {
+				mutation: Some(body_mutation::Mutation::StreamedResponse(
+					proto::StreamedBodyResponse {
+						body: b"partial".to_vec().into(),
+						end_of_stream: false,
+					},
+				)),
+			}),
+			..Default::default()
+		});
+		let _ = sender.send(request_body_response(response)).await;
+		self.sent_body = true;
+		Ok(())
+	}
+
+	fn close_stream(&self) -> bool {
+		self.sent_body
 	}
 }
 

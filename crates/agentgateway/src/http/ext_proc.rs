@@ -54,7 +54,7 @@ struct ResponseLoopContext<'a> {
 
 struct RequestLoopContext<'a> {
 	request: Option<&'a mut http::Request>,
-	body_tx: &'a mut Sender<Result<Frame<Bytes>, Infallible>>,
+	body_tx: &'a mut Sender<Result<Frame<Bytes>, Error>>,
 	fsm: &'a mut RequestFlowFsm,
 	send_headers: bool,
 	ignore_mode_override: bool,
@@ -1263,6 +1263,7 @@ impl ExtProcInstance {
 						loop {
 							let Some(presp) = rx.recv().await else {
 								trace!("done receiving request");
+								let _ = tx_chunk.send(Err(Error::NoMoreResponses)).await;
 								return;
 							};
 							if let Some(resp) = to_immediate_response(&presp) {
@@ -1284,6 +1285,7 @@ impl ExtProcInstance {
 								Ok(response) => response,
 								Err(error) => {
 									warn!("request stream mutation failed: {error}");
+									let _ = tx_chunk.send(Err(error)).await;
 									return;
 								},
 							};
@@ -1416,9 +1418,9 @@ impl ExtProcInstance {
 		Ok(())
 	}
 
-	async fn forward_body_to_channel(
+	async fn forward_body_to_channel<BodyError: Send + 'static>(
 		mut body: http::Body,
-		tx_chunk: Sender<Result<Frame<Bytes>, Infallible>>,
+		tx_chunk: Sender<Result<Frame<Bytes>, BodyError>>,
 		body_error_message: &'static str,
 	) -> Result<(), Error> {
 		while let Some(frame) = body
@@ -1435,9 +1437,9 @@ impl ExtProcInstance {
 		Ok(())
 	}
 
-	fn spawn_forward_body_to_channel(
+	fn spawn_forward_body_to_channel<BodyError: Send + 'static>(
 		body: http::Body,
-		tx_chunk: Sender<Result<Frame<Bytes>, Infallible>>,
+		tx_chunk: Sender<Result<Frame<Bytes>, BodyError>>,
 		body_error_message: &'static str,
 	) {
 		tokio::task::spawn(async move {

@@ -400,12 +400,24 @@ pub(crate) async fn maybe_convert_mcp_error<T>(
 
 impl From<Error> for ProxyError {
 	fn from(value: Error) -> Self {
+		if let Error::Deserialize(error) = &value {
+			let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
+			while let Some(error) = cause {
+				if matches!(
+					error.downcast_ref::<crate::http::ext_proc::Error>(),
+					Some(crate::http::ext_proc::Error::NoMoreResponses)
+				) {
+					return ProxyError::ExtProc(crate::http::ext_proc::Error::NoMoreResponses);
+				}
+				cause = error.source();
+			}
+		}
 		ProxyError::MCP(value)
 	}
 }
 impl<T> From<Error> for Result<T, ProxyError> {
 	fn from(val: Error) -> Self {
-		Err(ProxyError::MCP(val))
+		Err(val.into())
 	}
 }
 
