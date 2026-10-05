@@ -95,9 +95,9 @@ pub(super) fn response_response_has_streamed_body_mutation(presp: &ProcessingRes
 	}
 }
 
-async fn forward_trailers(
+async fn forward_trailers<BodyError>(
 	direction: &'static str,
-	body_tx: &mut Sender<Result<Frame<Bytes>, Infallible>>,
+	body_tx: &mut Sender<Result<Frame<Bytes>, BodyError>>,
 	trailer_slot: &Mutex<Option<::http::HeaderMap>>,
 	header_mutation: Option<&HeaderMutation>,
 ) -> bool {
@@ -117,7 +117,7 @@ pub(super) async fn handle_response_for_request_mutation(
 	allow_header_mutations: bool,
 	validate_content_length: bool,
 	mut req: Option<&mut http::Request>,
-	body_tx: &mut Sender<Result<Frame<Bytes>, Infallible>>,
+	body_tx: &mut Sender<Result<Frame<Bytes>, Error>>,
 	request_trailers: &Mutex<Option<::http::HeaderMap>>,
 	presp: ProcessingResponse,
 ) -> Result<(bool, bool), Error> {

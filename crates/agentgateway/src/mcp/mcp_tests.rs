@@ -16,6 +16,7 @@ use crate::http::sessionpersistence::MCPSession;
 use crate::mcp::handler::Relay;
 use crate::mcp::router::{McpBackendGroup, McpTarget};
 use crate::mcp::{FailureMode, McpAuthorization, guardrails};
+use crate::proxy::ProxyError;
 use crate::proxy::httpproxy::PolicyClient;
 use crate::test_helpers::extauthmock::{ExtAuthMock, deny_response};
 use crate::test_helpers::proxymock::{
@@ -26,6 +27,34 @@ use crate::types::agent::{
 	BackendTrafficPolicy, FrontendPolicy, McpServerOverrides, PolicyTarget, TargetedPolicy,
 };
 use crate::*;
+
+#[test]
+fn premature_ext_proc_body_error_preserves_processing_failure() {
+	let deserialize_error = || {
+		let body_error = http::Error::new(http::ext_proc::Error::NoMoreResponses);
+		mcp::Error::Deserialize(http::Error::new(body_error))
+	};
+	let proxy_error: ProxyError = deserialize_error().into();
+	assert!(matches!(
+		proxy_error,
+		ProxyError::ExtProc(http::ext_proc::Error::NoMoreResponses)
+	));
+	let result: Result<(), ProxyError> = deserialize_error().into();
+	assert!(matches!(
+		result,
+		Err(ProxyError::ExtProc(http::ext_proc::Error::NoMoreResponses))
+	));
+}
+
+#[test]
+fn malformed_json_preserves_mcp_deserialization_error() {
+	let json_error = serde_json::from_slice::<serde_json::Value>(b"{").unwrap_err();
+	let proxy_error: ProxyError = mcp::Error::Deserialize(http::Error::new(json_error)).into();
+	assert!(matches!(
+		proxy_error,
+		ProxyError::MCP(mcp::Error::Deserialize(_))
+	));
+}
 
 #[tokio::test]
 async fn token_exchange_rejections_preserve_http_status() {
